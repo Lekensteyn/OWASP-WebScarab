@@ -75,7 +75,7 @@ public class ReentrantReaderPreferenceReadWriteLock extends ReentrantWriterPrefe
         return activeWriter_ == null || activeWriter_ == Thread.currentThread();
     }
     
-    public void debug() {
+    public synchronized void debug() {
         Iterator<?> it = readers_.keySet().iterator();
         System.err.println("Readers:");
         while(it.hasNext()) {
