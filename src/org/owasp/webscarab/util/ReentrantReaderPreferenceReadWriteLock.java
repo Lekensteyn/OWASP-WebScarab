@@ -82,6 +82,13 @@ public class ReentrantReaderPreferenceReadWriteLock extends ReentrantWriterPrefe
             Object key = it.next();
             Object value = readers_.get(key);
             System.err.println(key + " : " + value);
+            if (key instanceof Thread) {
+                // NOTE: this is the current stack trace, not the one at the moment of acquiring
+                StackTraceElement[] stackTrace = ((Thread) key).getStackTrace();
+                Throwable throwable = new Throwable("Current stack trace for reader");
+                throwable.setStackTrace(stackTrace);
+                throwable.printStackTrace();
+            }
         }
         System.err.println("Done");
         System.err.println("Writer thread:");
