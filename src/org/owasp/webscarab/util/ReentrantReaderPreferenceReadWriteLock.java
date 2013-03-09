@@ -104,6 +104,8 @@ public class ReentrantReaderPreferenceReadWriteLock extends ReentrantWriterPrefe
     private class LoggingLock implements Sync {
         
         private Sync _sync;
+        private StackTraceElement[] lastHolder;
+        private StackTraceElement[] lastReleaser;
         
         public LoggingLock(Sync sync) {
             _sync = sync;
@@ -111,20 +113,35 @@ public class ReentrantReaderPreferenceReadWriteLock extends ReentrantWriterPrefe
         
         public void acquire() throws InterruptedException {
             // System.err.println(Thread.currentThread().getName() + " acquiring");
-            while (!_sync.attempt(5000)) {
+            while (!attempt(5000)) {
                 debug();
             }
             // System.err.println(Thread.currentThread().getName() + " acquired");
         }
-        
+
         public boolean attempt(long msecs) throws InterruptedException {
             // System.err.println(Thread.currentThread().getName() + " attempting");
             try {
                 boolean result = _sync.attempt(msecs);
                 if (result) {
+                    if (lastHolder != null) {
+                        throw new AssertionError("Lock was already acquired!");
+                    }
+                    lastHolder = Thread.currentThread().getStackTrace();
                     // System.err.println(Thread.currentThread().getName() + " successful");
                 } else {
                     System.err.println(Thread.currentThread().getName() + "sync attempt unsuccessful");
+                    if (lastReleaser != null) {
+                        Throwable throwable = new Throwable("Previous lock releaser");
+                        throwable.setStackTrace(lastReleaser);
+                        throwable.printStackTrace();
+                    }
+                    if (lastHolder != null) {
+                        Throwable throwable = new Throwable("Previous lock holder");
+                        throwable.setStackTrace(lastHolder);
+                        throwable.printStackTrace();
+                    }
+                    new Throwable("Current attempting stack").printStackTrace();
                 }
                 return result;
             } catch (InterruptedException ie) {
@@ -136,6 +153,11 @@ public class ReentrantReaderPreferenceReadWriteLock extends ReentrantWriterPrefe
         public void release() {
             // System.err.println(Thread.currentThread().getName() + " releasing");
             _sync.release();
+            if (lastHolder == null) {
+                throw new AssertionError("Lock was already released");
+            }
+            lastReleaser = lastHolder;
+            lastHolder = null;
             // System.err.println(Thread.currentThread().getName() + " released");
         }
         

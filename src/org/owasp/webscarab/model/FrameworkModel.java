@@ -55,6 +55,7 @@ import org.owasp.webscarab.util.MRUCache;
 import org.owasp.webscarab.util.ReentrantReaderPreferenceReadWriteLock;
 
 import java.io.File;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Provides a model of the conversations that have been seen
@@ -165,6 +166,15 @@ public class FrameworkModel {
         return new ConversationID();
     }
     
+    private final AtomicInteger dbgCtr = new AtomicInteger();
+    private int lockDebug(String msg, Integer dbgId) {
+        if (dbgId == null) {
+            dbgId = dbgCtr.incrementAndGet();
+        }
+        System.err.printf("\033[1m%s\t%4d: %s\033[m\n",
+                _rwl.writeLock().toString(), dbgId, msg);
+        return dbgId;
+    }
     /**
      * adds a request and a response to the model, also specifying which plugin caused
      * it.
@@ -175,9 +185,12 @@ public class FrameworkModel {
      */
     public void addConversation(ConversationID id, Date when, Request request, Response response, String origin) {
         try {
+            int dbgid = lockDebug("Adding conversation", null);
             HttpUrl url = request.getURL();
             addUrl(url); // fires appropriate events
+            lockDebug("URL added", dbgid);
             _rwl.writeLock().acquire();
+            lockDebug("got lock", dbgid);
             int index = _store.addConversation(id, when, request, response);
             _store.setConversationProperty(id, "METHOD", request.getMethod());
             _store.setConversationProperty(id, "URL", request.getURL().toString());
@@ -189,8 +202,11 @@ public class FrameworkModel {
             	_store.setConversationProperty(id, "RESPONSE_SIZE", Integer.toString(content.length));
             _rwl.readLock().acquire();
             _rwl.writeLock().release();
-            _conversationModel.fireConversationAdded(id, index); // FIXME
+            lockDebug("write lock released", dbgid);
+            //_conversationModel.fireConversationAdded(id, index); // FIXME
             _rwl.readLock().release();
+            lockDebug("read lock released too!", dbgid);
+            _conversationModel.fireConversationAdded(id, index); // FIXME
             addUrlProperty(url, "METHODS", request.getMethod());
             addUrlProperty(url, "STATUS", response.getStatusLine());
         } catch (InterruptedException ie) {
@@ -348,7 +364,9 @@ public class FrameworkModel {
     
     private void addUrl(HttpUrl url) {
         try {
+            int dbgId = lockDebug("addUrl: Acquiring readLock", null);
             _rwl.readLock().acquire();
+            lockDebug("addUrl: got readLock", dbgId);
             try {
                 if (!_store.isKnownUrl(url)) {
                     HttpUrl[] path = url.getUrlHierarchy();
@@ -359,30 +377,38 @@ public class FrameworkModel {
                             // we should check again to make sure that it does not exist
                             // AFTER we get our writelock
                             
+                            lockDebug("addUrl: getting writeLock", dbgId);
                             // FIXME There is something very strange going on here
                             // sometimes we deadlock if we just do a straight acquire
                             // but there does not seem to be anything competing for the lock.
                             // This works, but it feels like a kluge! FIXME!!!
-                            // _rwl.writeLock().acquire();
-                            while (!_rwl.writeLock().attempt(5000)) {
+                            // No deadlock here, it just waits until all readers are done.
+                             _rwl.writeLock().acquire();
+                            /*while (!_rwl.writeLock().attempt(5000)) {
                                 _logger.severe("Timed out waiting for write lock, trying again");
                                 _rwl.debug();
-                            }
+                            }*/
                             if (!_store.isKnownUrl(path[i])) {
+                                lockDebug("addUrl: got writeLock, adding URL", dbgId);
                                 _store.addUrl(path[i]);
+                                lockDebug("addUrl: url added, acquiring readlock", dbgId);
                                 _rwl.readLock().acquire(); // downgrade without giving up lock
                                 _rwl.writeLock().release();
+                                lockDebug("addUrl: writeLock released, firing URL", dbgId);
                                 _urlModel.fireUrlAdded(path[i], 0); // FIXME
                                 _modified = true;
                             } else { // modified by some other thread?! Go through the motions . . .
+                                lockDebug("addUrl: modified by other thread, releasing writelock", dbgId);
                                 _rwl.readLock().acquire();
                                 _rwl.writeLock().release();
                             }
+                            lockDebug("addUrl: back in readlock-free", dbgId);
                         }
                     }
                 }
             } finally {
                 _rwl.readLock().release();
+                lockDebug("addUrl: finished function, gave readLock away", dbgId);
             }
         } catch (InterruptedException ie) {
             _logger.severe("Interrupted! " + ie);
